@@ -20,25 +20,62 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extract project ZIP
+      - name: Extract project
         run: |
           unzip -q IconChanger_Android_GitHub_Actions.zip -d extracted
-          echo "Extracted files:"
-          find extracted -maxdepth 3 -type f | head -50
 
       - name: Install Gradle
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip
-          unzip -q gradle-8.9-bin.zip -d $HOME/gradle
-          echo "$HOME/gradle/gradle-8.9/bin" >> $GITHUB_PATH
+          unzip -q gradle-8.9-bin.zip -d "$HOME/gradle"
+          echo "$HOME/gradle/gradle-8.9/bin" >> "$GITHUB_PATH"
 
       - name: Build APK
         run: |
           cd extracted/IconChanger
           gradle assembleDebug --no-daemon
 
+      - name: Locate APK
+        run: |
+          find extracted -name "*.apk" -type f -print
+
+      - name: Create signing key
+        run: |
+          keytool -genkeypair \
+            -v \
+            -keystore "$HOME/release.keystore" \
+            -alias iconchanger \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=IconChanger,O=IconChanger,C=EG"
+
+      - name: Sign APK
+        run: |
+          APK=$(find extracted -name "app-debug.apk" -type f | head -1)
+
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -type d | sort -V | tail -1)
+
+          "$BUILD_TOOLS/zipalign" -f -p 4 \
+            "$APK" \
+            /tmp/aligned.apk
+
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$HOME/release.keystore" \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out /tmp/IconChanger.apk \
+            /tmp/aligned.apk
+
+      - name: Verify APK
+        run: |
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -type d | sort -V | tail -1)
+          "$BUILD_TOOLS/apksigner" verify --verbose /tmp/IconChanger.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: IconChanger-APK
-          path: extracted/IconChanger/app/build/outputs/apk/debug/app-debug.apk
+          path: /tmp/IconChanger.apk
